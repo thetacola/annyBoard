@@ -55,7 +55,7 @@ done
 
 echo "compiling main and media files..."
 
-gcc -o anny_board main.c media.c \
+gcc -o anny_board.out main.c media.c \
     `sdl2-config --cflags --libs` \
     -lSDL2_ttf -lSDL2_image \
     -lcurl -ldl -lm \
