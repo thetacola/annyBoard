@@ -11,6 +11,7 @@ REQUIRED_PACKAGES=(
     libavformat-dev 
     libavcodec-dev
     libavutil-dev
+    libswscale-dev
 )
 
 echo "checking dependencies..."
