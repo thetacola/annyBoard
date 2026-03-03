@@ -67,4 +67,4 @@ gcc -o anny_board.out main.c media.c \
 
 echo "running board..."
 
-./anny_board
+./anny_board.out
