@@ -41,6 +41,10 @@ typedef struct {
     int humidity;
     float wind_speed;
 
+    char temp_unit[8];
+    char pressure_unit[8];
+    char wind_unit[8];
+
 } Weather;
 
 
@@ -65,6 +69,10 @@ static void free_texts(State *s) {
     s[0].t1=s[0].t2=s[0].t3=s[0].t4=NULL;
 }
 
+static size_t xml_to_w(char *ptr, size_t size, size_t nmemb, Weather *w) {
+
+}
+
 static Weather* get_weather(State *s) {
     Weather *w = malloc(sizeof(Weather));
     w->feels_like = 0.0;
@@ -73,6 +81,9 @@ static Weather* get_weather(State *s) {
     w->temp = 0;
     w->wind_speed = 0.0;
     strcpy(w->description, "");
+    strcpy(w->temp_unit, "");
+    strcpy(w->pressure_unit, "");
+    strcpy(w->wind_unit, "");
 
     FILE *apiptr;
     char api_key_path[1024];
@@ -83,6 +94,7 @@ static Weather* get_weather(State *s) {
         fprintf(stderr, "Weather Tile: API key sucessfully loaded!\n");
         char api_key[128];
         fgets(api_key, 128, apiptr);
+        api_key[strcspn(api_key, "\n")] = 0;
 
         FILE *propsptr;
         char props_path[1024];
@@ -95,25 +107,38 @@ static Weather* get_weather(State *s) {
                 CURLcode result;
                 char api_url[1024];
 
-                // not sure how many properties i'll end up adding, assume a lot, don't buffer anything for funsies :)
+                float lat = 0.0;
+                float lon = 0.0;
+                char *units = malloc(sizeof(char) * 64);
+                strcpy(units, "imperial");
 
-                char *props = malloc(sizeof(char) * 8192);
+                char line[256];
+                while (fgets(line, sizeof(line), propsptr)) {
+                    char *name = strtok(line, ":");
+                    char *value = strtok(NULL, ":");
 
-                fgets(props, 8192, propsptr);
+                    value[strcspn(value, "\n")] = 0;
 
-                float lat;
-                float lon;
+                    fprintf(stderr, "Weather Tile: Reading property %s with value \"%s\"\n", name, value);
 
-                char *line = strtok(props, "\n");
-                while (line != NULL) {
-                    // TODO: make this not a hellish if-else
-
+                    if (strcmp(name, "lat") == 0) {
+                        lat = atof(value);
+                    } else if (strcmp(name, "lon") == 0) {
+                        lon = atof(value);
+                    } else if (strcmp(name, "units") == 0) {
+                        strcpy(units, value);
+                    }
                 }
 
-                free(props);
-
-                snprintf(api_url, 1024, "https://api.openweathermap.org/data/2.5/weather?lat=%0.1f&lon=%0.1f&appid=%s", lat, lon, api_key);
+                fprintf(stderr, "Weather Tile: https://api.openweathermap.org/data/2.5/weather?mode=xml&lat=%0.1f&lon=%0.1f&units=%s&appid=%s\n", lat, lon, units, api_key);
+                snprintf(api_url, 1024, "https://api.openweathermap.org/data/2.5/weather?mode=xml&lat=%0.1f&lon=%0.1f&units=%s&appid=%s", lat, lon, units, api_key);
+                curl_easy_setopt(curl, CURLOPT_WRITEDATA, w);
+                curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, xml_to_w);
                 curl_easy_setopt(curl, CURLOPT_URL, api_url);
+                result = curl_easy_perform(curl);
+                curl_easy_cleanup(curl);
+
+                free(units);
             }
             fclose(propsptr);
         }
@@ -180,6 +205,12 @@ static void tile_update(void *state, double dt) {
     //Nothing time-animated in this tile right now.
 }
 
+static void tile_on_show(void *st) {
+    State *s = (State*)st;
+    rebuild_texts(s);
+    fprintf(stderr, "Weather Tile: on_show state=%p\n", st);
+}
+
 
 static void tile_render(void *state, SDL_Renderer *r, const SDL_Rect *rect) {
     State *s = (State*)state;
@@ -216,6 +247,7 @@ static Tile TILE = {
     .update = tile_update,
     .render = tile_render,
     .preferred_duration = tile_pref_duration,
+    .on_show = tile_on_show,
     .on_hide = NULL
 };
 
