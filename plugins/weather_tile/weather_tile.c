@@ -2,6 +2,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <curl/curl.h>
+#include <libxml/HTMLparser.h>
 #include <time.h>
 #include <stdio.h>
 #include <string.h>
@@ -47,6 +48,10 @@ typedef struct {
 
 } Weather;
 
+typedef struct {
+	char *response;
+	size_t size;
+} CURL_Critter;
 
 //This is important, it makes our char*s into textures
 static SDL_Texture* make_text(SDL_Renderer *r, TTF_Font *font,
@@ -69,7 +74,54 @@ static void free_texts(State *s) {
     s[0].t1=s[0].t2=s[0].t3=s[0].t4=NULL;
 }
 
-static size_t xml_to_w(char *ptr, size_t size, size_t nmemb, Weather *w) {
+static size_t download(char *data, size_t size, size_t nmemb, void *clientp) {
+	size_t realsize = nmemb;
+	CURL_Critter *mem = (CURL_Critter *)clientp;
+	
+	char *ptr = realloc(mem->response, mem->size + realsize + 1);
+	if (!ptr) {
+		return 0;
+	}
+
+	mem->response = ptr;
+	memcpy(&(mem->response[mem->size]), data, realsize);
+	mem->size += realsize;
+	mem->response[mem->size] = 0;
+	return realsize;
+}
+
+static void parse_weather(Weather *w, CURL_Critter *c) {
+	xmlDoc *doc = xmlParseDoc((xmlChar *)c->response);
+	xmlNodePtr root = xmlDocGetRootElement(doc);
+	
+	for (xmlNodePtr cur = root->children; cur != NULL; cur = cur->next) {
+		// evil else-if of doom
+		if (strcmp(cur->name, "temperature") == 0) {
+			w->temp = atof(xmlGetProp(cur, "value"));
+			xmlChar *unit_name = xmlGetProp(cur, "unit");
+			if (strcmp(unit_name, "fahrenheit") == 0) {
+				strcpy(w->temp_unit, "F");
+			} else if (strcmp(unit_name, "celsius") == 0) {
+				strcpy(w->temp_unit, "C");
+			} else if (strcmp(unit_name, "kelvin") == 0) {
+				strcpy(w->temp_unit, "K");
+			}
+		} else if (strcmp(cur->name, "feels_like") == 0) {
+			w->feels_like = atof(xmlGetProp(cur, "value"));
+		} else if (strcmp(cur->name, "humidity") == 0) {
+			w->humidity = atoi(xmlGetProp(cur, "value"));
+		} else if (strcmp(cur->name, "pressure") == 0) {
+			w->pressure = atoi(xmlGetProp(cur, "value"));
+			strcpy(w->pressure_unit,  xmlGetProp(cur, "unit"));
+		} else if (strcmp(cur->name, "wind") == 0) {
+			for (xmlNodePtr windChild = cur->children; windChild != NULL; windChild = windChild->next) {
+				if (strcmp(windChild->name, "speed") == 0) {
+					w->wind_speed = atof(xmlGetProp(windChild, "value"));
+					strcpy(w->wind_unit, xmlGetProp(windChild, "unit"));
+				}
+			}
+		}
+	}
 
 }
 
@@ -119,8 +171,6 @@ static Weather* get_weather(State *s) {
 
                     value[strcspn(value, "\n")] = 0;
 
-                    fprintf(stderr, "Weather Tile: Reading property %s with value \"%s\"\n", name, value);
-
                     if (strcmp(name, "lat") == 0) {
                         lat = atof(value);
                     } else if (strcmp(name, "lon") == 0) {
@@ -130,15 +180,19 @@ static Weather* get_weather(State *s) {
                     }
                 }
 
-                fprintf(stderr, "Weather Tile: https://api.openweathermap.org/data/2.5/weather?mode=xml&lat=%0.1f&lon=%0.1f&units=%s&appid=%s\n", lat, lon, units, api_key);
                 snprintf(api_url, 1024, "https://api.openweathermap.org/data/2.5/weather?mode=xml&lat=%0.1f&lon=%0.1f&units=%s&appid=%s", lat, lon, units, api_key);
-                curl_easy_setopt(curl, CURLOPT_WRITEDATA, w);
-                curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, xml_to_w);
+                
+		CURL_Critter ccritter = { 0 };
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&ccritter);
+                curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download);
                 curl_easy_setopt(curl, CURLOPT_URL, api_url);
                 result = curl_easy_perform(curl);
                 curl_easy_cleanup(curl);
 
+		parse_weather(w, &ccritter);
+
                 free(units);
+		free(ccritter.response);
             }
             fclose(propsptr);
         }
@@ -167,17 +221,18 @@ static void rebuild_texts(State *s) {
     // TODO: respect units in the config
 
     snprintf(line1, sizeof(line1), "Weather | %s", w->description);
-    snprintf(line2, sizeof(line2), "%0.1f°F | Feels like: %0.1f°F", w->temp, w->feels_like);
-    snprintf(line3, sizeof(line3), "%dmBar | %d%% Humidity", w->pressure, w->humidity);
-    snprintf(line4, sizeof(line4), "%0.1fmph wind", w->wind_speed);
-
-    free(w);
-
+    snprintf(line2, sizeof(line2), "%0.1f°%s | Feels like: %0.1f°%s", w->temp, w->temp_unit, w->feels_like, w->temp_unit);
+    snprintf(line3, sizeof(line3), "%d%s | %d%% Humidity", w->pressure, w->pressure_unit, w->humidity);
+    snprintf(line4, sizeof(line4), "%0.1f%s wind", w->wind_speed, w->wind_unit);
 
     s[0].t1 = make_text(r, s[0].ctx[0].font_medium, line1, &s[0].t1w, &s[0].t1h);
     s[0].t2 = make_text(r, s[0].ctx[0].font_small,  line2, &s[0].t2w, &s[0].t2h);
     s[0].t3 = make_text(r, s[0].ctx[0].font_small,  line3, &s[0].t3w, &s[0].t3h);
     s[0].t4 = make_text(r, s[0].ctx[0].font_small,  line4, &s[0].t4w, &s[0].t4h);
+    
+    free(w);
+
+
 }
 
 static const char* tile_name(void) { return "Weather"; }

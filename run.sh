@@ -98,6 +98,7 @@ fi
 
 ROOT_DIR="$(pwd)"
 PLUGINS_DIR="$ROOT_DIR/plugins"
+XML_CFLAGS="$(pkg-config --cflags libxml-2.0)"
 
 echo "attempting to compile plugins..."
 
@@ -113,22 +114,23 @@ for plugin_dir in "$PLUGINS_DIR"/*/; do
 
         echo "Compiling $cfile -> $plugin_dir$name.so"
 
-        gcc -g -fPIC -shared \
+        gcc -g -fPIC -shared $XML_CFLAGS \
             -o "$plugin_dir$name.so" \
             "$cfile" \
             `sdl2-config --cflags --libs` \
             -lSDL2_ttf -lSDL2_image -lm \
-            -lcurl
+            -lcurl -lxml2
     done
 done
 
 echo "compiling main and media files..."
 
 gcc -g -o anny_board.out main.c media.c \
+     $XML_CFLAGS \
     `sdl2-config --cflags --libs` \
     -lSDL2_ttf -lSDL2_image \
     -lcurl -ldl -lm \
-    -lavformat -lavcodec -lavutil -lswscale -lswresample
+    -lavformat -lavcodec -lavutil -lswscale -lswresample -lxml2
 
 echo "running board..."
 
