@@ -114,7 +114,7 @@ for plugin_dir in "$PLUGINS_DIR"/*/; do
 
         echo "Compiling $cfile -> $plugin_dir$name.so"
 
-        gcc -g -fPIC -shared $XML_CFLAGS \
+        gcc -fPIC -shared $XML_CFLAGS \
             -o "$plugin_dir$name.so" \
             "$cfile" \
             `sdl2-config --cflags --libs` \
@@ -125,7 +125,7 @@ done
 
 echo "compiling main and media files..."
 
-gcc -g -o anny_board.out main.c media.c \
+gcc -o anny_board.out main.c media.c \
      $XML_CFLAGS \
     `sdl2-config --cflags --libs` \
     -lSDL2_ttf -lSDL2_image \
